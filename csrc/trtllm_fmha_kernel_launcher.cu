@@ -25,6 +25,21 @@
 #include <iostream>
 #include <optional>
 
+template <typename T>
+Data_type at_type_to_data_type(T type) {
+  if (type == at::ScalarType::Float) {
+    return Data_type::DATA_TYPE_FP32;
+  } else if (type == at::ScalarType::Half) {
+    return Data_type::DATA_TYPE_FP16;
+  } else if (type == at::ScalarType::BFloat16) {
+    return Data_type::DATA_TYPE_BF16;
+  } else if (type == at::ScalarType::Float8_e4m3fn) {
+    return Data_type::DATA_TYPE_E4M3;
+  } else {
+    FLASHINFER_ERROR("Unsupported data type");
+  }
+}
+
 namespace flashinfer {
 template <typename T, Data_type CACHE_T>
 void trtllm_paged_attention_decode_launcher(
@@ -62,9 +77,8 @@ void trtllm_paged_attention_decode_launcher(
   auto io_type = TypeToDataType<T>::value;
 
   bool use_multi_block = true;
-  auto q_data_type =
-      key_value_cache.dtype() == at::ScalarType::Float8_e4m3fn ? DATA_TYPE_E4M3 : io_type;
-  auto output_dtype = io_type;
+  auto q_data_type = at_type_to_data_type(query.dtype());
+  auto output_dtype = at_type_to_data_type(out.dtype());
   static auto fmha_runner = TllmGenFmhaRunner(q_data_type, CACHE_T, io_type);
 
   TllmGenFmhaRunnerParams runner_params;
@@ -129,9 +143,6 @@ void trtllm_paged_attention_decode_launcher(
     err_msg << "Missing TRTLLM-GEN decode kernel:" << kinfo;
     FLASHINFER_ERROR(err_msg.str());
   }
-  // else {
-  //   std::cout << "Found TRTLLM-GEN decode kernel" << kinfo << std::endl;
-  // }
 
   runner_params.mMultiProcessorCount = getMultiProcessorCount();
   auto const [free_memory, total_memory] = getDeviceMemoryInfo(false);
@@ -294,6 +305,7 @@ void trtllm_paged_attention_context(at::Tensor& out, at::Tensor& query, at::Tens
                                     double bmm2_scale, int64_t batch_size, int64_t window_left,
                                     int64_t sum_seq_q, int64_t sum_seq_kv,
                                     at::Tensor& cum_seq_lens_q, at::Tensor& cum_seq_lens_kv) {
+
   if (query.dtype() == at::ScalarType::Half && key_value_cache.dtype() == at::ScalarType::Half) {
     trtllm_paged_attention_context_launcher<half, Data_type::DATA_TYPE_FP16>(
         out, query, key_value_cache, workspace_buffer, num_kv_heads, block_tables, seq_lens,
